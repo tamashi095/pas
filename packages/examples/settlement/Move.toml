@@ -1,0 +1,6 @@
+[package]
+name = "settlement"
+edition = "2024.beta"
+
+[dependencies]
+pas = { local = "../../pas" }
