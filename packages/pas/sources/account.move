@@ -11,7 +11,7 @@ use pas::{
     unlock_funds::{Self, UnlockFunds},
     versioning::Versioning
 };
-use sui::{balance::{Self, Balance}, derived_object};
+use sui::{balance::{Self, Balance}, derived_object, transfer::Receiving};
 
 use fun balance::withdraw_funds_from_object as UID.withdraw_funds_from_object;
 #[error(code = 0)]
@@ -185,5 +185,130 @@ fun internal_send_balance<C>(
         from.id.to_inner(),
         recipient_account_id.to_id(),
         funds,
+    )
+}
+
+// === Generic object support ===
+//
+// Objects are stored using transfer-to-object: a deposit is a `public_transfer`
+// to the account's address, and a withdrawal is a `public_receive` using the
+// account's `&mut UID`. This mirrors the balance accumulator flow and keeps the
+// "owner == account address" property, so objects are discoverable via RPC the
+// same way balances are.
+//
+// SECURITY: because `T: key + store` objects are freely `public_transfer`-able by
+// whoever holds the bare value, the closed loop only holds while the object lives
+// at an account address. Issuers must deposit objects directly into accounts and
+// avoid releasing them to bare wallets (see the unlock note below).
+
+/// Deposit an object into an account. The object becomes owned by the account's
+/// address, exactly like a balance deposit.
+public fun deposit_object<T: key + store>(account: &Account, obj: T) {
+    account.versioning.assert_is_valid_version();
+    transfer::public_transfer(obj, object::id(account).to_address());
+}
+
+/// Deposit an object into `owner`'s account by deriving the account address from
+/// the namespace. Unlike `deposit_object`, this does NOT require the account to
+/// exist yet — the object lands at the derived account address and can be received
+/// once the owner creates their account (mirrors how `unsafe_send_*` delivers to
+/// not-yet-created accounts).
+///
+/// This is the safe primitive for minting/airdropping: it keeps the destination
+/// derivation inside PAS so issuers can't accidentally send to a bare wallet
+/// address (which would put a freely-transferable object outside the closed loop).
+public fun deposit_object_to_owner<T: key + store>(namespace: &Namespace, owner: address, obj: T) {
+    namespace.versioning().assert_is_valid_version();
+    transfer::public_transfer(obj, namespace.account_address(owner));
+}
+
+/// Enables an object unlock flow. Mirrors `unlock_balance`.
+///
+/// This is useful for objects that are not managed by a Policy within the system,
+/// or if there's a special case where an issuer allows objects to flow out.
+public fun unlock_object<T: key + store>(
+    account: &mut Account,
+    auth: &Auth,
+    receiving: Receiving<T>,
+    _ctx: &mut TxContext,
+): Request<UnlockFunds<T>> {
+    auth.assert_is_valid_for_account!(account);
+    account.versioning.assert_is_valid_version();
+    let obj = account.withdraw_object<T>(receiving);
+    events::emit_object_unlocked<T>(account.owner, object::id(&obj));
+    unlock_funds::new(account.owner, account.id.to_inner(), obj)
+}
+
+/// Initiate an object transfer from account A to account B. Mirrors `send_balance`.
+public fun send_object<T: key + store>(
+    from: &mut Account,
+    auth: &Auth,
+    to: &Account,
+    receiving: Receiving<T>,
+    _ctx: &mut TxContext,
+): Request<SendFunds<T>> {
+    auth.assert_is_valid_for_account!(from);
+    from.versioning.assert_is_valid_version();
+    from.internal_send_object<T>(to.owner, receiving)
+}
+
+/// Transfer an object from account to an address. This unlocks transfers to an
+/// account before it has been created. Mirrors `unsafe_send_balance`.
+///
+/// It's marked as `unsafe_` as it's easy to accidentally pick the wrong recipient.
+public fun unsafe_send_object<T: key + store>(
+    from: &mut Account,
+    auth: &Auth,
+    // Recipients should always be the wallet or object address, not the account ID.
+    recipient_address: address,
+    receiving: Receiving<T>,
+    _ctx: &mut TxContext,
+): Request<SendFunds<T>> {
+    auth.assert_is_valid_for_account!(from);
+    from.versioning.assert_is_valid_version();
+    from.internal_send_object<T>(recipient_address, receiving)
+}
+
+/// Initiate a clawback request for an object. Mirrors `clawback_balance`.
+/// Takes no `Auth`, as it's an admin action, and can only finalize if clawback is
+/// enabled in the policy.
+public fun clawback_object<T: key + store>(
+    from: &mut Account,
+    receiving: Receiving<T>,
+    _ctx: &mut TxContext,
+): Request<ClawbackFunds<T>> {
+    from.versioning.assert_is_valid_version();
+    let obj = from.withdraw_object<T>(receiving);
+    events::emit_object_clawback<T>(from.owner, object::id(&obj));
+    clawback_funds::new(from.owner, from.id.to_inner(), obj)
+}
+
+public(package) fun withdraw_object<T: key + store>(
+    account: &mut Account,
+    receiving: Receiving<T>,
+): T {
+    account.versioning.assert_is_valid_version();
+    transfer::public_receive(&mut account.id, receiving)
+}
+
+/// The internal implementation for sending an object towards another address.
+///
+/// INTERNAL WARNING: Callers must verify that `to` is the user address, NOT the
+/// account address. Failure to do so can cause assets to move out of the closed loop.
+fun internal_send_object<T: key + store>(
+    from: &mut Account,
+    to: address,
+    receiving: Receiving<T>,
+): Request<SendFunds<T>> {
+    let obj = from.withdraw_object<T>(receiving);
+    let recipient_account_id = namespace::account_address_from_id(from.namespace_id, to);
+    events::emit_object_sent<T>(from.owner, to, object::id(&obj));
+
+    send_funds::new(
+        from.owner,
+        to,
+        from.id.to_inner(),
+        recipient_account_id.to_id(),
+        obj,
     )
 }

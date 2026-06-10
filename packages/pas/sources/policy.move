@@ -6,6 +6,7 @@ use sui::{
     balance::Balance,
     coin::TreasuryCap,
     derived_object,
+    package::Publisher,
     vec_map::{Self, VecMap},
     vec_set::{Self, VecSet}
 };
@@ -17,6 +18,9 @@ const EInvalidAction: vector<u8> = b"Invalid action type.";
 #[error(code = 2)]
 const ENotSupportedAction: vector<u8> =
     b"The requested action type is not supported by the issuer.";
+#[error(code = 3)]
+const ENotAuthorized: vector<u8> =
+    b"The publisher is not authorized to create a policy for this object type.";
 
 /// A policy is set by the owner of `T`, and points to a `TypeName` that needs
 /// to be verified by the entity's contract.
@@ -61,6 +65,37 @@ public fun new_for_currency<C>(
     };
 
     let policy_cap = PolicyCap<Balance<C>> {
+        id: derived_object::claim(&mut policy.id, PolicyCapKey()),
+    };
+
+    (policy, policy_cap)
+}
+
+/// Create a policy for a generic object type `T`.
+///
+/// Unlike currencies (which prove authority via a `TreasuryCap`), object types
+/// have no mint capability. Authority is instead proven with the `Publisher` of
+/// the package that defines `T` — mirroring `sui::transfer_policy::new`. Only the
+/// package that defines `T` can register a policy for it.
+public fun new_for_object<T: key + store>(
+    namespace: &mut Namespace,
+    publisher: &Publisher,
+    clawback_allowed: bool,
+): (Policy<T>, PolicyCap<T>) {
+    assert!(publisher.from_package<T>(), ENotAuthorized);
+    assert!(!namespace.policy_exists<T>(), EPolicyAlreadyExists);
+
+    let versioning = namespace.versioning();
+    versioning.assert_is_valid_version();
+
+    let mut policy = Policy<T> {
+        id: derived_object::claim(namespace.uid_mut(), keys::policy_key<T>()),
+        required_approvals: vec_map::empty(),
+        versioning,
+        clawback_allowed,
+    };
+
+    let policy_cap = PolicyCap<T> {
         id: derived_object::claim(&mut policy.id, PolicyCapKey()),
     };
 

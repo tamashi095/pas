@@ -69,3 +69,15 @@ public fun resolve_balance<C>(
     let SendFunds { funds, recipient_account_id, .. } = data;
     balance::send_funds(funds, recipient_account_id.to_address());
 }
+
+/// Resolve a transfer request for a generic object, if there are enough approvals.
+///
+/// The object is deposited into the recipient's account address, keeping it within
+/// the permissioned system.
+public fun resolve_object<T: key + store>(request: Request<SendFunds<T>>, policy: &Policy<T>) {
+    policy.versioning().assert_is_valid_version();
+    let data = request.resolve(policy.required_approvals(send_funds_action()));
+
+    let SendFunds { funds, recipient_account_id, .. } = data;
+    transfer::public_transfer(funds, recipient_account_id.to_address());
+}

@@ -49,6 +49,22 @@ public fun resolve_unrestricted_balance<C>(
     funds
 }
 
+/// The object equivalent of `resolve_unrestricted_balance`.
+///
+/// Enables unlocking objects that are not managed by a Policy within the system.
+/// If a `Policy<T>` exists, the object can only be resolved from within the system
+/// via the managed `resolve` below.
+public fun resolve_unrestricted_object<T: key + store>(
+    request: Request<UnlockFunds<T>>,
+    namespace: &Namespace,
+): T {
+    assert!(!namespace.policy_exists<T>(), ECannotResolveManagedAssets);
+    namespace.versioning().assert_is_valid_version();
+    let data = request.resolve(vec_set::empty());
+    let UnlockFunds { funds, .. } = data;
+    funds
+}
+
 /// Resolve an unlock funds request as long as funds management is enabled and
 /// there are enough valid approvals.
 public fun resolve<T: store>(request: Request<UnlockFunds<T>>, policy: &Policy<T>): T {
