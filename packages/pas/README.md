@@ -2,7 +2,9 @@
 
 This Move package contains the core Permissioned Asset Standard (PAS) modules for
 accounts, policies, requests, and approval flows that govern restricted asset
-movement on Sui.
+movement on Sui. PAS manages both fungible **balances** and arbitrary `key + store`
+**objects** (via transfer-to-object); see the `*_object` functions in `account`,
+`send_funds`, and `policy::new_for_object`.
 
 ## Docs
 
