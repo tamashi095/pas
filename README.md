@@ -10,7 +10,7 @@ programmable approval logic. It governs both fungible **balances** and arbitrary
 packages/
   pas/          # Core PAS Move package (accounts, policies, requests)
   ptb/          # PTB helper Move package
-  examples/     # Example Move packages (KYC-gated coin, loyalty, permissioned NFT)
+  examples/     # Example Move packages (KYC-gated coin, loyalty, permissioned NFT, time-locked NFT)
 scripts/
   example-app/  # TypeScript example app using @mysten/pas
 ```
