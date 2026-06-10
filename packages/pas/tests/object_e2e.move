@@ -487,6 +487,68 @@ fun deposit_object_to_owner_mints_into_account() {
     });
 }
 
+#[test]
+fun compose_via_add_required_approval() {
+    test_obj_tx!(@0x1, |namespace, policy, scenario| {
+        scenario.next_tx(@0x1);
+        // The harness set {ObjApproval} for send_funds; stack a second rule's witness.
+        let policy_cap = scenario.take_from_sender<PolicyCap<Obj>>();
+        policy.add_required_approval<_, ObjApproval2>(&policy_cap, b"send_funds".to_string());
+        scenario.return_to_sender(policy_cap);
+
+        let mut from = account::create(namespace, @0x1);
+        let to = account::create(namespace, @0x2);
+        let obj = Obj { id: object::new(scenario.ctx()) };
+        let obj_id = object::id(&obj);
+        from.deposit_object(obj);
+        from.share();
+        to.share();
+
+        scenario.next_tx(@0x1);
+        let mut from = scenario.take_shared_by_id<Account>(namespace.account_address(@0x1).to_id());
+        let to = scenario.take_shared_by_id<Account>(namespace.account_address(@0x2).to_id());
+        let receiving = ts::receiving_ticket_by_id<Obj>(obj_id);
+        let auth = account::new_auth(scenario.ctx());
+        let mut request = from.send_object<Obj>(&auth, &to, receiving, scenario.ctx());
+        // Satisfy in the maker's registration order.
+        request.approve(ObjApproval());
+        request.approve(ObjApproval2());
+        send_funds::resolve_object(request, policy);
+        return_shared(from);
+        return_shared(to);
+    });
+}
+
+#[test, expected_failure(abort_code = ::pas::request::EInsufficientApprovals)]
+fun compose_wrong_order_fails() {
+    test_obj_tx!(@0x1, |namespace, policy, scenario| {
+        scenario.next_tx(@0x1);
+        let policy_cap = scenario.take_from_sender<PolicyCap<Obj>>();
+        policy.add_required_approval<_, ObjApproval2>(&policy_cap, b"send_funds".to_string());
+        scenario.return_to_sender(policy_cap);
+
+        let mut from = account::create(namespace, @0x1);
+        let to = account::create(namespace, @0x2);
+        let obj = Obj { id: object::new(scenario.ctx()) };
+        let obj_id = object::id(&obj);
+        from.deposit_object(obj);
+        from.share();
+        to.share();
+
+        scenario.next_tx(@0x1);
+        let mut from = scenario.take_shared_by_id<Account>(namespace.account_address(@0x1).to_id());
+        let to = scenario.take_shared_by_id<Account>(namespace.account_address(@0x2).to_id());
+        let receiving = ts::receiving_ticket_by_id<Obj>(obj_id);
+        let auth = account::new_auth(scenario.ctx());
+        let mut request = from.send_object<Obj>(&auth, &to, receiving, scenario.ctx());
+        // Wrong order — the policy maker registered {ObjApproval, ObjApproval2}.
+        request.approve(ObjApproval2());
+        request.approve(ObjApproval());
+        send_funds::resolve_object(request, policy);
+        abort
+    });
+}
+
 fun pkg_id(): ID {
     sui::address::from_ascii_bytes(std::type_name::with_defining_ids<Namespace>()
         .address_string()

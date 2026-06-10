@@ -124,6 +124,28 @@ public fun set_required_approval<T, A: drop>(
     );
 }
 
+/// Add a single required approval `A` to an action's set WITHOUT replacing the
+/// existing ones (unlike `set_required_approval`). This is what lets independent
+/// rule modules each register their own witness on the same action — composing into
+/// a multi-rule policy where a request must collect all of them to resolve. The
+/// insertion order is the policy maker's chosen rule order, which `request::resolve`
+/// enforces.
+public fun add_required_approval<T, A: drop>(
+    policy: &mut Policy<T>,
+    _cap: &PolicyCap<T>,
+    action: String,
+) {
+    policy.versioning.assert_is_valid_version();
+    assert!(keys::is_valid_action(action), EInvalidAction);
+
+    let approval = type_name::with_defining_ids<A>();
+    if (policy.required_approvals.contains(&action)) {
+        policy.required_approvals.get_mut(&action).insert(approval);
+    } else {
+        policy.required_approvals.insert(action, vec_set::singleton(approval));
+    };
+}
+
 /// Remove the action approval for a given action (this will make all requests not resolve).
 public fun remove_action_approval<T>(policy: &mut Policy<T>, _: &PolicyCap<T>, action: String) {
     policy.versioning.assert_is_valid_version();
