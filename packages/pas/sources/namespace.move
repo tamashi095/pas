@@ -125,3 +125,11 @@ public fun create_for_testing(ctx: &mut TxContext): Namespace {
 public fun share_for_testing(namespace: Namespace) {
     transfer::share_object(namespace);
 }
+
+/// Mark the namespace as set up (so `uid_mut` works) without a real `UpgradeCap`.
+/// Lets dependent packages bootstrap a working namespace in their own unit tests,
+/// since `setup` is a package-private `entry` fun.
+#[test_only]
+public fun setup_for_testing(namespace: &mut Namespace) {
+    namespace.upgrade_cap_id = option::some(object::id_from_address(@0x1));
+}

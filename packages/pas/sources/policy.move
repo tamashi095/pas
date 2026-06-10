@@ -6,6 +6,7 @@ use sui::{
     balance::Balance,
     coin::TreasuryCap,
     derived_object,
+    package::Publisher,
     vec_map::{Self, VecMap},
     vec_set::{Self, VecSet}
 };
@@ -17,6 +18,9 @@ const EInvalidAction: vector<u8> = b"Invalid action type.";
 #[error(code = 2)]
 const ENotSupportedAction: vector<u8> =
     b"The requested action type is not supported by the issuer.";
+#[error(code = 3)]
+const ENotAuthorized: vector<u8> =
+    b"The publisher is not authorized to create a policy for this object type.";
 
 /// A policy is set by the owner of `T`, and points to a `TypeName` that needs
 /// to be verified by the entity's contract.
@@ -67,6 +71,37 @@ public fun new_for_currency<C>(
     (policy, policy_cap)
 }
 
+/// Create a policy for a generic object type `T`.
+///
+/// Unlike currencies (which prove authority via a `TreasuryCap`), object types
+/// have no mint capability. Authority is instead proven with the `Publisher` of
+/// the package that defines `T` — mirroring `sui::transfer_policy::new`. Only the
+/// package that defines `T` can register a policy for it.
+public fun new_for_object<T: key + store>(
+    namespace: &mut Namespace,
+    publisher: &Publisher,
+    clawback_allowed: bool,
+): (Policy<T>, PolicyCap<T>) {
+    assert!(publisher.from_package<T>(), ENotAuthorized);
+    assert!(!namespace.policy_exists<T>(), EPolicyAlreadyExists);
+
+    let versioning = namespace.versioning();
+    versioning.assert_is_valid_version();
+
+    let mut policy = Policy<T> {
+        id: derived_object::claim(namespace.uid_mut(), keys::policy_key<T>()),
+        required_approvals: vec_map::empty(),
+        versioning,
+        clawback_allowed,
+    };
+
+    let policy_cap = PolicyCap<T> {
+        id: derived_object::claim(&mut policy.id, PolicyCapKey()),
+    };
+
+    (policy, policy_cap)
+}
+
 public fun share<T>(policy: Policy<T>) {
     transfer::share_object(policy);
 }
@@ -87,6 +122,28 @@ public fun set_required_approval<T, A: drop>(
         action,
         vec_set::singleton(type_name::with_defining_ids<A>()),
     );
+}
+
+/// Add a single required approval `A` to an action's set WITHOUT replacing the
+/// existing ones (unlike `set_required_approval`). This is what lets independent
+/// rule modules each register their own witness on the same action — composing into
+/// a multi-rule policy where a request must collect all of them to resolve. The
+/// insertion order is the policy maker's chosen rule order, which `request::resolve`
+/// enforces.
+public fun add_required_approval<T, A: drop>(
+    policy: &mut Policy<T>,
+    _cap: &PolicyCap<T>,
+    action: String,
+) {
+    policy.versioning.assert_is_valid_version();
+    assert!(keys::is_valid_action(action), EInvalidAction);
+
+    let approval = type_name::with_defining_ids<A>();
+    if (policy.required_approvals.contains(&action)) {
+        policy.required_approvals.get_mut(&action).insert(approval);
+    } else {
+        policy.required_approvals.insert(action, vec_set::singleton(approval));
+    };
 }
 
 /// Remove the action approval for a given action (this will make all requests not resolve).

@@ -1,12 +1,16 @@
 # Permissioned Asset Standard
 
+PAS enforces restricted asset movement on Sui through Accounts, Policies, and
+programmable approval logic. It governs both fungible **balances** and arbitrary
+`key + store` **objects** (see [`ARCHITECTURE.md`](./ARCHITECTURE.md#generic-objects-beyond-balances)).
+
 ## Repository Structure
 
 ```
 packages/
   pas/          # Core PAS Move package (accounts, policies, requests)
   ptb/          # PTB helper Move package
-  examples/     # Example Move packages (e.g. KYC-gated coin)
+  examples/     # Example Move packages (KYC-gated coin, loyalty, permissioned NFT, time-locked NFT)
 scripts/
   example-app/  # TypeScript example app using @mysten/pas
 ```
